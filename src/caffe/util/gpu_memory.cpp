@@ -150,12 +150,21 @@ void GPUMemory::Manager::update_dev_info(int device) {
              << dev_info_[device].free_ << " Total="
              << dev_info_[device].total_;
 
+#ifdef _MSC_VER
   // Make sure we don't have more that total device memory
   dev_info_[device].total_ = min(props.totalGlobalMem,
       dev_info_[device].total_);	//WINHACK
   // Here we are adding existing 'busy' allocations to CUDA free memory
   dev_info_[device].free_ = min(dev_info_[device].total_,
-      dev_info_[device].free_ + cub_allocator_->cached_bytes[device].free);	//WINHACK
+	  dev_info_[device].free_ + cub_allocator_->cached_bytes[device].free);	//WINHACK
+#else
+  dev_info_[device].total_ = std::min(props.totalGlobalMem,
+	  dev_info_[device].total_);
+    dev_info_[device].free_ = std::min(dev_info_[device].total_,
+	  dev_info_[device].free_ + cub_allocator_->cached_bytes[device].free);	
+#endif
+
+
   CUDA_CHECK(cudaSetDevice(initial_device));
 }
 
