@@ -3,11 +3,12 @@
 
 # cuDNN acceleration switch (uncomment to build with cuDNN).
 # cuDNN version 4 or higher is required.
-# USE_CUDNN := 1
+USE_CUDNN := 1
 
 # NCCL acceleration switch (uncomment to build with NCCL)
 # See https://github.com/NVIDIA/nccl
-# USE_NCCL := 1
+USE_NCCL := 1
+NCCL_DIR := /home/ypashchenko/nccl/build
 
 # CPU-only switch (uncomment to build without GPU support).
 # cuDNN version 4 or higher is required.
@@ -49,7 +50,7 @@ CUDA_ARCH := -gencode arch=compute_20,code=sm_20 \
 # atlas for ATLAS (default)
 # mkl for MKL
 # open for OpenBlas
-BLAS := atlas
+BLAS := open
 # Custom (MKL/ATLAS/OpenBLAS) include and lib directories.
 # Leave commented to accept the defaults for your choice of BLAS
 # (which should work)!
@@ -103,6 +104,9 @@ LIBRARY_DIRS := $(PYTHON_LIB) /usr/local/lib /usr/lib
 # Uncomment to use `pkg-config` to specify OpenCV library paths.
 # (Usually not necessary -- OpenCV libraries are normally installed in one of the above $LIBRARY_DIRS.)
 # USE_PKG_CONFIG := 1
+
+# Uncomment to specify destination to HDF5 library
+INCLUDE_DIRS + /usr/include/hdf5/serial
 
 BUILD_DIR := build
 DISTRIBUTE_DIR := distribute

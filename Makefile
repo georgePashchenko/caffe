@@ -338,6 +338,8 @@ endif
 ifeq ($(USE_NCCL), 1)
 	LIBRARIES += nccl
 	COMMON_FLAGS += -DUSE_NCCL
+	INCLUDE_DIRS += $(NCCL_DIR)/include
+	LIBRARY_DIRS += $(NCCL_DIR)/lib
 endif
 
 # configure IO libraries
