@@ -3,7 +3,6 @@
 #endif  // USE_OPENCV
 #include <stdint.h>
 
-#include <string>
 #include <vector>
 
 #include "caffe/data_transformer.hpp"
@@ -16,37 +15,6 @@ template <typename Dtype>
 DataLayer<Dtype>::DataLayer(const LayerParameter& param)
   : BasePrefetchingDataLayer<Dtype>(param),
     reader_(param) {
-    // Check user override in param file
-    if (this->layer_param_.data_param().threads() == 0) {
-#ifndef CPU_ONLY
-        // In GPU mode, default to # CPU cores / # GPUs
-        if (Caffe::mode() == Caffe::GPU) {
-            int cuda_devices;
-            unsigned int cpu_count;
-            unsigned int prefetch_threads;
-            cpu_count = boost::thread::hardware_concurrency();
-            CUDA_CHECK(cudaGetDeviceCount(&cuda_devices));
-            CHECK_GE(cuda_devices, 1) << "No CUDA devices found";
-            DLOG(INFO) << "CPU threads: " << cpu_count
-                       << " GPU devices visible: " << cuda_devices;
-            prefetch_threads = cpu_count > cuda_devices ?
-                cpu_count / cuda_devices + (cpu_count % cuda_devices != 0) : 1;
-            DLOG(INFO) << "Data processing threads: " << prefetch_threads;
-            pool_.reset(new ThreadPool(prefetch_threads));
-        } else {
-            // In CPU mode, 1 thread seems to be enough
-            DLOG(INFO) << "Data processing threads: 1";
-            pool_.reset(new ThreadPool(1));
-        }
-#else
-        DLOG(INFO) << "Data processing threads: 1";
-        pool_.reset(new ThreadPool(1));
-#endif
-    } else {
-        DLOG(INFO) << "Data processing threads: "
-                   << this->layer_param_.data_param().threads();
-        pool_.reset(new ThreadPool(this->layer_param_.data_param().threads()));
-    }
 }
 
 template <typename Dtype>
@@ -59,10 +27,7 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) {
   const int batch_size = this->layer_param_.data_param().batch_size();
   // Read a data point, and use it to initialize the top blob.
-  string& str = *(reader_.full().peek());
-  // Parse this data point so we can use the datum to infer things
-  Datum datum;
-  datum.ParseFromString(str);
+  Datum& datum = *(reader_.full().peek());
 
   // Use data_transformer to infer the expected blob shape from datum.
   vector<int> top_shape = this->data_transformer_->InferBlobShape(datum);
@@ -92,6 +57,7 @@ void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
   CPUTimer batch_timer;
   batch_timer.Start();
   double read_time = 0;
+  double trans_time = 0;
   CPUTimer timer;
   CHECK(batch->data_.count());
   CHECK(this->transformed_data_.count());
@@ -99,9 +65,7 @@ void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
   // Reshape according to the first datum of each batch
   // on single input batches allows for inputs of varying dimension.
   const int batch_size = this->layer_param_.data_param().batch_size();
-  string& str = *(reader_.full().peek());
-  Datum datum;
-  datum.ParseFromString(str);
+  Datum& datum = *(reader_.full().peek());
   // Use data_transformer to infer the expected blob shape from datum.
   vector<int> top_shape = this->data_transformer_->InferBlobShape(datum);
   this->transformed_data_.Reshape(top_shape);
@@ -116,47 +80,28 @@ void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
     top_label = batch->label_.mutable_cpu_data();
   }
   for (int item_id = 0; item_id < batch_size; ++item_id) {
-      timer.Start();
-      // Get a datum
-      string* str = (reader_.full().pop("Waiting for data"));
-      read_time += timer.MicroSeconds();
-      // Copy label.
-      Dtype* label_ptr = NULL;
-      if (this->output_labels_) {
-          label_ptr = &top_label[item_id];
-      }
+    timer.Start();
+    // get a datum
+    Datum& datum = *(reader_.full().pop("Waiting for data"));
+    read_time += timer.MicroSeconds();
+    timer.Start();
+    // Apply data transformations (mirror, scale, crop...)
+    int offset = batch->data_.offset(item_id);
+    this->transformed_data_.set_cpu_data(top_data + offset);
+    this->data_transformer_->Transform(datum, &(this->transformed_data_));
+    // Copy label.
+    if (this->output_labels_) {
+      top_label[item_id] = datum.label();
+    }
+    trans_time += timer.MicroSeconds();
 
-      // Get data offset for this datum to hand off to transform thread
-      int offset = batch->data_.offset(item_id);
-      this->transformed_data_.set_cpu_data(top_data + offset);
-      Dtype* ptr = this->transformed_data_.mutable_cpu_data();
-
-      // Precalculate the necessary random draws so that they are
-      // drawn deterministically
-      int rand1 = 0, rand2 = 0, rand3 = 0;
-      if (this->transform_param_.mirror()) {
-         rand1 = this->data_transformer_->Rand(RAND_MAX)+1;
-      }
-      if (this->phase_ == TRAIN && this->transform_param_.crop_size()) {
-         rand2 = this->data_transformer_->Rand(RAND_MAX)+1;
-         rand3 = this->data_transformer_->Rand(RAND_MAX)+1;
-      }
-
-      pool_->runTask(boost::bind(&DataTransformer<Dtype>::TransformPtrEntry,
-                                this->data_transformer_.get(), str, ptr,
-                                rand1, rand2, rand3,
-                                this->output_labels_, label_ptr,
-                                &(reader_.free())));
+    reader_.free().push(const_cast<Datum*>(&datum));
   }
   timer.Stop();
-
-  // Need to make sure we have completed all work before returning or
-  // completing timimg
-  pool_->waitWorkComplete();
   batch_timer.Stop();
-
   DLOG(INFO) << "Prefetch batch: " << batch_timer.MilliSeconds() << " ms.";
   DLOG(INFO) << "     Read time: " << read_time / 1000 << " ms.";
+  DLOG(INFO) << "Transform time: " << trans_time / 1000 << " ms.";
 }
 
 INSTANTIATE_CLASS(DataLayer);

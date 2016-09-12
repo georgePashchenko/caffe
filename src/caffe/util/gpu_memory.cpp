@@ -163,8 +163,6 @@ void GPUMemory::Manager::update_dev_info(int device) {
     dev_info_[device].free_ = std::min(dev_info_[device].total_,
 	  dev_info_[device].free_ + cub_allocator_->cached_bytes[device].free);	
 #endif
-
-
   CUDA_CHECK(cudaSetDevice(initial_device));
 }
 

@@ -1,4 +1,5 @@
 #include <caffe/caffe.hpp>
+#include "caffe/util/gpu_memory.hpp"
 #ifdef USE_OPENCV
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -11,10 +12,25 @@
 #include <utility>
 #include <vector>
 
+#include <time.h>
 #ifdef USE_OPENCV
 using namespace caffe;  // NOLINT(build/namespaces)
 using std::string;
 
+#ifndef CPU_ONLY
+shared_ptr<GPUMemory::Scope> gpu_memory_scope;
+
+void initialize_gpu_memory_scope() {
+  vector<int> gpus;
+  int count = 0;
+  CUDA_CHECK(cudaGetDeviceCount(&count));
+  for (int i = 0; i < count; ++i) {
+    gpus.push_back(i);
+  }
+  CHECK_GT(gpus.size(), 0);
+  gpu_memory_scope.reset(new GPUMemory::Scope(gpus));
+}
+#endif
 /* Pair (label, confidence) representing a prediction. */
 typedef std::pair<string, float> Prediction;
 
@@ -53,6 +69,8 @@ Classifier::Classifier(const string& model_file,
   Caffe::set_mode(Caffe::CPU);
 #else
   Caffe::set_mode(Caffe::GPU);
+  // We need to run GPU-built Caffe on CPU sometimes.
+  initialize_gpu_memory_scope();
 #endif
 
   /* Load the network. */
@@ -249,8 +267,9 @@ int main(int argc, char** argv) {
 
   cv::Mat img = cv::imread(file, -1);
   CHECK(!img.empty()) << "Unable to decode image " << file;
+ time_t t1 = clock();
   std::vector<Prediction> predictions = classifier.Classify(img);
-
+  std::cout<<" time spent per prediction = "<<(double)(clock() - t1)/CLOCKS_PER_SEC<<std::endl;
   /* Print the top N predictions. */
   for (size_t i = 0; i < predictions.size(); ++i) {
     Prediction p = predictions[i];
