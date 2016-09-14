@@ -169,7 +169,9 @@ void DataTransformer<Dtype>::Transform(const Datum& datum,
 #endif  // USE_OPENCV
   } else {
     if (param_.force_color() || param_.force_gray()) {
+#ifndef _MSC_VER
       LOG(ERROR) << "force_color and force_gray only for encoded datum";
+#endif
     }
   }
 
