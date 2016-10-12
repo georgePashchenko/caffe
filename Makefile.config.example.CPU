@@ -3,16 +3,16 @@
 
 # cuDNN acceleration switch (uncomment to build with cuDNN).
 # cuDNN version 4 or higher is required.
-USE_CUDNN := 1
+# USE_CUDNN := 1
 
 # NCCL acceleration switch (uncomment to build with NCCL)
 # See https://github.com/NVIDIA/nccl
-USE_NCCL := 1
-NCCL_DIR := /home/ypashchenko/nccl/build
+#USE_NCCL := 1
+#NCCL_DIR := /home/ypashchenko/nccl/build
 
 # CPU-only switch (uncomment to build without GPU support).
 # cuDNN version 4 or higher is required.
-# CPU_ONLY := 1
+CPU_ONLY := 1
 
 # uncomment to disable IO dependencies and corresponding data layers
 # USE_OPENCV := 0
