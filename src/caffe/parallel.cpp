@@ -280,6 +280,64 @@ void P2PSync<Dtype>::allreduce() {
 }
 
 template<typename Dtype>
+void P2PSync<Dtype>::on_gradients_ready() {
+#ifndef CPU_ONLY
+#ifdef DEBUG
+  int device;
+  CUDA_CHECK(cudaGetDevice(&device));
+  CHECK(device == solver_->param().device_id());
+#endif
+
+  // Sum children gradients as they appear in the queue
+  for (int i = 0; i < children_.size(); ++i) {
+    P2PSync<Dtype> *child = queue_.pop();
+    Dtype* src = child->parent_grads_;
+    Dtype* dst = diff_;
+
+#ifdef DEBUG
+    bool ok = false;
+    for (int j = 0; j < children_.size(); ++j) {
+      if (child == children_[j]) {
+        ok = true;
+      }
+    }
+    CHECK(ok);
+    cudaPointerAttributes attributes;
+    CUDA_CHECK(cudaPointerGetAttributes(&attributes, src));
+    CHECK(attributes.device == device);
+    CUDA_CHECK(cudaPointerGetAttributes(&attributes, dst));
+    CHECK(attributes.device == device);
+#endif
+
+    caffe_gpu_add(size_, src, dst, dst);
+  }
+
+  // Send gradients to parent
+  if (parent_) {
+    Dtype* src = diff_;
+    Dtype* dst = parent_grads_;
+
+#ifdef DEBUG
+    cudaPointerAttributes attributes;
+    CUDA_CHECK(cudaPointerGetAttributes(&attributes, src));
+    CHECK(attributes.device == device);
+    CUDA_CHECK(cudaPointerGetAttributes(&attributes, dst));
+    CHECK(attributes.device == parent_->solver_->param().device_id());
+#endif
+
+    CUDA_CHECK(cudaMemcpyAsync(dst, src, size_ * sizeof(Dtype),  //
+        cudaMemcpyDeviceToDevice, cudaStreamDefault));
+    CUDA_CHECK(cudaStreamSynchronize(cudaStreamDefault));
+    parent_->queue_.push(this);
+  } else {
+    // Loss functions divide gradients by the batch size, so to compensate
+    // for split batch, the root solver divides by number of solvers.
+    caffe_gpu_scal(size_, Dtype(1.0 / Caffe::solver_count()), diff_);
+  }
+#endif
+}
+
+template<typename Dtype>
 void P2PSync<Dtype>::allreduce(int param_id) {
 #ifndef CPU_ONLY
 #ifdef USE_NCCL
@@ -326,6 +384,7 @@ void P2PSync<Dtype>::Run(const vector<int>& gpus) {
   NCCL_CHECK(ncclCommInitAll(comms, nranks_, gpu_list));
 
   this->setNCCLComm(comms[0]);
+
 
   for (int i = 1; i < nranks_; ++i) {
     syncs[i]->setNCCLComm(comms[i]);

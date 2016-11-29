@@ -6,14 +6,13 @@
 
 #include "caffe/net.hpp"
 #include "caffe/solver_factory.hpp"
-#include "caffe/util/benchmark.hpp"
 
 namespace caffe {
 
 /**
   * @brief Enumeration of actions that a client of the Solver may request by
   * implementing the Solver's action request function, which a
-  * a client may optionally provide in order to request early termination
+  * client may optionally provide in order to request early termination
   * or saving a snapshot without exiting. In the executable caffe, this
   * mechanism is used to allow the snapshot to be saved when stopping
   * execution with a SIGINT (Ctrl-C).
@@ -80,11 +79,11 @@ class Solver {
    public:
     virtual void allreduce(int param_id) = 0;
     virtual void syncCommStream() = 0;
-
    protected:
     virtual void on_start() = 0;
     virtual void allreduce() = 0;
     virtual void soft_barrier() = 0;
+    virtual void on_gradients_ready() = 0;
 
     template <typename T>
     friend class Solver;
@@ -108,12 +107,15 @@ class Solver {
   string SnapshotToHDF5();
   // The test routine
   void TestAll();
-  void Test(const int test_net_id = 0);
+  void TestClassification(const int test_net_id = 0);
+  void TestDetection(const int test_net_id = 0);
   virtual void SnapshotSolverState(const string& model_filename) = 0;
   virtual void RestoreSolverStateFromHDF5(const string& state_file) = 0;
   virtual void RestoreSolverStateFromBinaryProto(const string& state_file) = 0;
   void DisplayOutputBlobs(const int net_id);
   void UpdateSmoothedLoss(Dtype loss, int start_iter, int average_loss);
+  /// Harmonize solver class type with configured proto type.
+  void CheckType(SolverParameter* param);
 
   SolverParameter param_;
   int iter_;
@@ -134,10 +136,6 @@ class Solver {
 
   // True iff a request to stop early was received.
   bool requested_early_exit_;
-
-  // Timing information
-  Timer iteration_timer_;
-  float iterations_last_;
 
   DISABLE_COPY_AND_ASSIGN(Solver);
 };

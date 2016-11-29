@@ -1,9 +1,12 @@
 #include <cstdio>
 
+#include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "caffe/solver.hpp"
+#include "caffe/util/bbox_util.hpp"
 #include "caffe/util/format.hpp"
 #include "caffe/util/hdf5.hpp"
 #include "caffe/util/io.hpp"
@@ -28,17 +31,29 @@ SolverAction::Enum Solver<Dtype>::GetRequestedAction() {
 template <typename Dtype>
 Solver<Dtype>::Solver(const SolverParameter& param, const Solver* root_solver)
     : net_(), callbacks_(), root_solver_(root_solver),
-      requested_early_exit_(false), iteration_timer_(), iterations_last_() {
+      requested_early_exit_(false) {
   Init(param);
 }
 
 template <typename Dtype>
 Solver<Dtype>::Solver(const string& param_file, const Solver* root_solver)
     : net_(), callbacks_(), root_solver_(root_solver),
-      requested_early_exit_(false), iteration_timer_(), iterations_last_() {
+      requested_early_exit_(false) {
   SolverParameter param;
   ReadSolverParamsFromTextFileOrDie(param_file, &param);
+  CheckType(&param);
   Init(param);
+}
+
+template <typename Dtype>
+void Solver<Dtype>::CheckType(SolverParameter* param) {
+  // Harmonize solver class type with configured type to avoid confusion.
+  if (param->has_type()) {
+    CHECK_EQ(param->type(), this->type())
+        << "Solver type must agree with instantiated solver class.";
+  } else {
+    param->set_type(this->type());
+  }
 }
 
 template <typename Dtype>
@@ -197,34 +212,22 @@ void Solver<Dtype>::Step(int iters) {
   int average_loss = this->param_.average_loss();
   losses_.clear();
   smoothed_loss_ = 0;
-  iteration_timer_.Start();
-
-  for (int i = 0; i < callbacks_.size(); ++i) {
-    // we need to sync all threads before starting, otherwise some cuda init,
-    // malloc or other cuda stuff could interlock with in-loop cuda GPU sync
-    // called in on_start.
-    callbacks_[i]->soft_barrier();
-    // Initial bcast of parameters
-    callbacks_[i]->on_start();
-  }
-
-  net_->SetSolver(this);
 
   while (iter_ < stop_iter) {
     // zero-init the params
     net_->ClearParamDiffs();
     if (param_.test_interval() && iter_ % param_.test_interval() == 0
-        && (iter_ > 0 || param_.test_initialization())) {
-      if (Caffe::root_solver()) {
-        TestAll();
-      }
+        && (iter_ > 0 || param_.test_initialization())
+        && Caffe::root_solver()) {
+      TestAll();
       if (requested_early_exit_) {
         // Break out of the while loop because stop was requested while testing.
         break;
       }
-      for (int i = 0; i < callbacks_.size(); ++i) {
-        callbacks_[i]->soft_barrier();
-      }
+    }
+
+    for (int i = 0; i < callbacks_.size(); ++i) {
+      callbacks_[i]->on_start();
     }
     const bool display = param_.display() && iter_ % param_.display() == 0;
     net_->set_debug_info(display && param_.debug_info());
@@ -237,13 +240,8 @@ void Solver<Dtype>::Step(int iters) {
     // average the loss across iterations for smoothed reporting
     UpdateSmoothedLoss(loss, start_iter, average_loss);
     if (display) {
-      float lapse = iteration_timer_.Seconds();
-      float per_s = (iter_ - iterations_last_) / (lapse ? lapse : 1);
       LOG_IF(INFO, Caffe::root_solver()) << "Iteration " << iter_
-          << " (" << per_s << " iter/s, " << lapse << "s/"
-          << param_.display() <<" iter), loss = " << smoothed_loss_;
-      iteration_timer_.Start();
-      iterations_last_ = iter_;
+          << ", loss = " << smoothed_loss_;
       const vector<Blob<Dtype>*>& result = net_->output_blobs();
       int score_index = 0;
       for (int j = 0; j < result.size(); ++j) {
@@ -264,17 +262,9 @@ void Solver<Dtype>::Step(int iters) {
         }
       }
     }
-#ifndef CPU_ONLY
-    CUDA_CHECK(cudaStreamSynchronize(cudaStreamDefault));
-#endif
     for (int i = 0; i < callbacks_.size(); ++i) {
-      callbacks_[i]->allreduce();
+      callbacks_[i]->on_gradients_ready();
     }
-    // Make sure all gradient exchanges have finished in per-level scheme
-    for (int i = 0; i < callbacks_.size(); ++i) {
-      callbacks_[i]->syncCommStream();
-    }
-
     ApplyUpdate();
 
     // Increment the internal iter_ counter -- its value should always indicate
@@ -352,12 +342,18 @@ void Solver<Dtype>::TestAll() {
   for (int test_net_id = 0;
        test_net_id < test_nets_.size() && !requested_early_exit_;
        ++test_net_id) {
-    Test(test_net_id);
+    if (param_.eval_type() == "classification") {
+      TestClassification(test_net_id);
+    } else if (param_.eval_type() == "detection") {
+      TestDetection(test_net_id);
+    } else {
+      LOG(FATAL) << "Unknown evaluation type: " << param_.eval_type();
+    }
   }
 }
 
 template <typename Dtype>
-void Solver<Dtype>::Test(const int test_net_id) {
+void Solver<Dtype>::TestClassification(const int test_net_id) {
   CHECK(Caffe::root_solver());
   LOG(INFO) << "Iteration " << iter_
             << ", Testing net (#" << test_net_id << ")";
@@ -428,6 +424,124 @@ void Solver<Dtype>::Test(const int test_net_id) {
     }
     LOG(INFO) << "    Test net output #" << i << ": " << output_name << " = "
               << mean_score << loss_msg_stream.str();
+  }
+}
+
+template <typename Dtype>
+void Solver<Dtype>::TestDetection(const int test_net_id) {
+  CHECK(Caffe::root_solver());
+  LOG(INFO) << "Iteration " << iter_
+            << ", Testing net (#" << test_net_id << ")";
+  CHECK_NOTNULL(test_nets_[test_net_id].get())->
+      ShareTrainedLayersWith(net_.get());
+  map<int, map<int, vector<pair<float, int> > > > all_true_pos;
+  map<int, map<int, vector<pair<float, int> > > > all_false_pos;
+  map<int, map<int, int> > all_num_pos;
+  const shared_ptr<Net<Dtype> >& test_net = test_nets_[test_net_id];
+  Dtype loss = 0;
+  for (int i = 0; i < param_.test_iter(test_net_id); ++i) {
+    SolverAction::Enum request = GetRequestedAction();
+    // Check to see if stoppage of testing/training has been requested.
+    while (request != SolverAction::NONE) {
+        if (SolverAction::SNAPSHOT == request) {
+          Snapshot();
+        } else if (SolverAction::STOP == request) {
+          requested_early_exit_ = true;
+        }
+        request = GetRequestedAction();
+    }
+    if (requested_early_exit_) {
+      // break out of test loop.
+      break;
+    }
+
+    Dtype iter_loss;
+    const vector<Blob<Dtype>*>& result = test_net->Forward(&iter_loss);
+    if (param_.test_compute_loss()) {
+      loss += iter_loss;
+    }
+    for (int j = 0; j < result.size(); ++j) {
+      CHECK_EQ(result[j]->width(), 5);
+      const Dtype* result_vec = result[j]->cpu_data();
+      int num_det = result[j]->height();
+      for (int k = 0; k < num_det; ++k) {
+        int item_id = static_cast<int>(result_vec[k * 5]);
+        int label = static_cast<int>(result_vec[k * 5 + 1]);
+        if (item_id == -1) {
+          // Special row of storing number of positives for a label.
+          if (all_num_pos[j].find(label) == all_num_pos[j].end()) {
+            all_num_pos[j][label] = static_cast<int>(result_vec[k * 5 + 2]);
+          } else {
+            all_num_pos[j][label] += static_cast<int>(result_vec[k * 5 + 2]);
+          }
+        } else {
+          // Normal row storing detection status.
+          float score = result_vec[k * 5 + 2];
+          int tp = static_cast<int>(result_vec[k * 5 + 3]);
+          int fp = static_cast<int>(result_vec[k * 5 + 4]);
+          if (tp == 0 && fp == 0) {
+            // Ignore such case. It happens when a detection bbox is matched to
+            // a difficult gt bbox and we don't evaluate on difficult gt bbox.
+            continue;
+          }
+          all_true_pos[j][label].push_back(std::make_pair(score, tp));
+          all_false_pos[j][label].push_back(std::make_pair(score, fp));
+        }
+      }
+    }
+  }
+  if (requested_early_exit_) {
+    LOG(INFO)     << "Test interrupted.";
+    return;
+  }
+  if (param_.test_compute_loss()) {
+    loss /= param_.test_iter(test_net_id);
+    LOG(INFO) << "Test loss: " << loss;
+  }
+  for (int i = 0; i < all_true_pos.size(); ++i) {
+    if (all_true_pos.find(i) == all_true_pos.end()) {
+      LOG(FATAL) << "Missing output_blob true_pos: " << i;
+    }
+    const map<int, vector<pair<float, int> > >& true_pos =
+        all_true_pos.find(i)->second;
+    if (all_false_pos.find(i) == all_false_pos.end()) {
+      LOG(FATAL) << "Missing output_blob false_pos: " << i;
+    }
+    const map<int, vector<pair<float, int> > >& false_pos =
+        all_false_pos.find(i)->second;
+    if (all_num_pos.find(i) == all_num_pos.end()) {
+      LOG(FATAL) << "Missing output_blob num_pos: " << i;
+    }
+    const map<int, int>& num_pos = all_num_pos.find(i)->second;
+    map<int, float> APs;
+    float mAP = 0.;
+    // Sort true_pos and false_pos with descend scores.
+    for (map<int, int>::const_iterator it = num_pos.begin();
+         it != num_pos.end(); ++it) {
+      int label = it->first;
+      int label_num_pos = it->second;
+      if (true_pos.find(label) == true_pos.end()) {
+        LOG(WARNING) << "Missing true_pos for label: " << label;
+        continue;
+      }
+      const vector<pair<float, int> >& label_true_pos =
+          true_pos.find(label)->second;
+      if (false_pos.find(label) == false_pos.end()) {
+        LOG(WARNING) << "Missing false_pos for label: " << label;
+        continue;
+      }
+      const vector<pair<float, int> >& label_false_pos =
+          false_pos.find(label)->second;
+      vector<float> prec, rec;
+      ComputeAP(label_true_pos, label_num_pos, label_false_pos,
+                param_.ap_version(), &prec, &rec, &(APs[label]));
+      mAP += APs[label];
+    }
+    mAP /= num_pos.size();
+    const int output_blob_index = test_net->output_blob_indices()[i];
+    const string& output_name = test_net->blob_names()[output_blob_index];
+    LOG(INFO) << "    Test net output #" << i << ": " << output_name << " = "
+              << mAP;
   }
 }
 

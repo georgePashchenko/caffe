@@ -15,7 +15,7 @@
  * and its type is its C++ class name, but without the "Solver" at the end
  * ("MyAwesomeSolver" -> "MyAwesome").
  *
- * If the solver is going to be created simply by its constructor, in your c++
+ * If the solver is going to be created simply by its constructor, in your C++
  * file, add the following line:
  *
  *    REGISTER_SOLVER_CLASS(MyAwesome);
@@ -53,7 +53,7 @@ class Solver;
 template <typename Dtype>
 class SolverRegistry {
  public:
-  typedef Solver<Dtype>* (*Creator)(const SolverParameter&, Solver<Dtype>*);
+  typedef Solver<Dtype>* (*Creator)(const SolverParameter&);
   typedef std::map<string, Creator> CreatorRegistry;
 
   static CreatorRegistry& Registry() {
@@ -70,13 +70,12 @@ class SolverRegistry {
   }
 
   // Get a solver using a SolverParameter.
-  static Solver<Dtype>* CreateSolver(const SolverParameter& param,
-      Solver<Dtype>* root_solver = NULL) {
+  static Solver<Dtype>* CreateSolver(const SolverParameter& param) {
     const string& type = param.type();
     CreatorRegistry& registry = Registry();
     CHECK_EQ(registry.count(type), 1) << "Unknown solver type: " << type
         << " (known types: " << SolverTypeListString() << ")";
-    return registry[type](param, root_solver);
+    return registry[type](param);
   }
 
   static vector<string> SolverTypeList() {
@@ -113,7 +112,7 @@ template <typename Dtype>
 class SolverRegisterer {
  public:
   SolverRegisterer(const string& type,
-      Solver<Dtype>* (*creator)(const SolverParameter&, Solver<Dtype>*)) {
+      Solver<Dtype>* (*creator)(const SolverParameter&)) {
     // LOG(INFO) << "Registering solver type: " << type;
     SolverRegistry<Dtype>::AddCreator(type, creator);
   }
@@ -127,10 +126,9 @@ class SolverRegisterer {
 #define REGISTER_SOLVER_CLASS(type)                                            \
   template <typename Dtype>                                                    \
   Solver<Dtype>* Creator_##type##Solver(                                       \
-      const SolverParameter& param,                                            \
-      Solver<Dtype>* root_solver)                                              \
+      const SolverParameter& param)                                            \
   {                                                                            \
-    return new type##Solver<Dtype>(param, root_solver);                        \
+    return new type##Solver<Dtype>(param);                                     \
   }                                                                            \
   REGISTER_SOLVER_CREATOR(type, Creator_##type##Solver)
 

@@ -29,58 +29,31 @@ void hdf5_load_nd_dataset_helper(
   CHECK_GE(status, 0) << "Failed to get dataset info for " << dataset_name_;
   switch (class_) {
   case H5T_FLOAT:
-    // In VC++ declaring and initializing variables in case statement without
-    // curly braces (new scope), cause compiler error C2360
-    // https://msdn.microsoft.com/en-us/library/61af7cx3.aspx
-    {
-      LOG_FIRST_N(INFO, 1) << "Datatype class: H5T_FLOAT";
-      break;
-    }
+    LOG_FIRST_N(INFO, 1) << "Datatype class: H5T_FLOAT";
+    break;
   case H5T_INTEGER:
-    {
-      LOG_FIRST_N(INFO, 1) << "Datatype class: H5T_INTEGER";
-      break;
-    }
+    LOG_FIRST_N(INFO, 1) << "Datatype class: H5T_INTEGER";
+    break;
   case H5T_TIME:
-    {
-      LOG(FATAL) << "Unsupported datatype class: H5T_TIME";
-    }
+    LOG(FATAL) << "Unsupported datatype class: H5T_TIME";
   case H5T_STRING:
-    {
-      LOG(FATAL) << "Unsupported datatype class: H5T_STRING";
-    }
+    LOG(FATAL) << "Unsupported datatype class: H5T_STRING";
   case H5T_BITFIELD:
-    {
-      LOG(FATAL) << "Unsupported datatype class: H5T_BITFIELD";
-    }
+    LOG(FATAL) << "Unsupported datatype class: H5T_BITFIELD";
   case H5T_OPAQUE:
-    {
-      LOG(FATAL) << "Unsupported datatype class: H5T_OPAQUE";
-    }
+    LOG(FATAL) << "Unsupported datatype class: H5T_OPAQUE";
   case H5T_COMPOUND:
-    {
-      LOG(FATAL) << "Unsupported datatype class: H5T_COMPOUND";
-    }
+    LOG(FATAL) << "Unsupported datatype class: H5T_COMPOUND";
   case H5T_REFERENCE:
-    {
-      LOG(FATAL) << "Unsupported datatype class: H5T_REFERENCE";
-    }
+    LOG(FATAL) << "Unsupported datatype class: H5T_REFERENCE";
   case H5T_ENUM:
-    {
-      LOG(FATAL) << "Unsupported datatype class: H5T_ENUM";
-    }
+    LOG(FATAL) << "Unsupported datatype class: H5T_ENUM";
   case H5T_VLEN:
-    {
-      LOG(FATAL) << "Unsupported datatype class: H5T_VLEN";
-    }
+    LOG(FATAL) << "Unsupported datatype class: H5T_VLEN";
   case H5T_ARRAY:
-    {
-      LOG(FATAL) << "Unsupported datatype class: H5T_ARRAY";
-    }
+    LOG(FATAL) << "Unsupported datatype class: H5T_ARRAY";
   default:
-    {
-      LOG(FATAL) << "Datatype class unknown";
-    }
+    LOG(FATAL) << "Datatype class unknown";
   }
 
   vector<int> blob_dims(dims.size());
@@ -186,6 +159,42 @@ void hdf5_save_int(hid_t loc_id, const string& dataset_name, int i) {
   hsize_t one = 1;
   herr_t status = \
     H5LTmake_dataset_int(loc_id, dataset_name.c_str(), 1, &one, &i);
+  CHECK_GE(status, 0)
+    << "Failed to save int dataset with name " << dataset_name;
+}
+
+template <>
+float hdf5_load_float<float>(hid_t loc_id, const string& dataset_name) {
+  float val;
+  herr_t status = H5LTread_dataset_float(loc_id, dataset_name.c_str(), &val);
+  CHECK_GE(status, 0)
+    << "Failed to load int dataset with name " << dataset_name;
+  return val;
+}
+template <>
+double hdf5_load_float<double>(hid_t loc_id, const string& dataset_name) {
+  double val;
+  herr_t status = H5LTread_dataset_double(loc_id, dataset_name.c_str(), &val);
+  CHECK_GE(status, 0)
+    << "Failed to load int dataset with name " << dataset_name;
+  return val;
+}
+
+template <>
+void hdf5_save_float<float>(hid_t loc_id,
+                            const string& dataset_name, float f) {
+  hsize_t one = 1;
+  herr_t status = \
+    H5LTmake_dataset_float(loc_id, dataset_name.c_str(), 1, &one, &f);
+  CHECK_GE(status, 0)
+    << "Failed to save int dataset with name " << dataset_name;
+}
+template <>
+void hdf5_save_float<double>(hid_t loc_id,
+                            const string& dataset_name, double f) {
+  hsize_t one = 1;
+  herr_t status = \
+    H5LTmake_dataset_double(loc_id, dataset_name.c_str(), 1, &one, &f);
   CHECK_GE(status, 0)
     << "Failed to save int dataset with name " << dataset_name;
 }

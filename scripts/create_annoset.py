@@ -91,7 +91,7 @@ if __name__ == "__main__":
         if not anno.isdigit():
           print "annotation: {} is not an integer".format(anno)
       elif anno_type == "detection":
-        if not os.path.exists(anno):
+        if not os.path.exists(root_dir + anno):
           print "annofation file: {} does not exist".format(anno)
           sys.exit()
       break

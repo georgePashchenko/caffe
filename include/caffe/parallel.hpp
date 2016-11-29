@@ -129,6 +129,7 @@ class P2PSync : public GPUParams<Dtype>, public Solver<Dtype>::Callback,
 #endif
   cudaStream_t getCommStream();
 #endif
+  void on_gradients_ready();
   void InternalThreadEntry();
 
   const int rank_;
@@ -144,6 +145,7 @@ class P2PSync : public GPUParams<Dtype>, public Solver<Dtype>::Callback,
   BlockingQueue<P2PSync<Dtype>*> queue_;
   const int initial_iter_;
 
+  Dtype* parent_grads_;
   shared_ptr<Solver<Dtype> > solver_;
   const SolverParameter& params_;
 
