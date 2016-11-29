@@ -1,12 +1,10 @@
-cur_dir=$(cd $( dirname ${BASH_SOURCE[0]} ) && pwd )
-root_dir=$cur_dir/../..
-
-cd $root_dir
+cur_dir=$(pwd)
+echo $cur_dir
 
 redo=false
-data_root_dir=""
-dataset_name="test_2_classes"
-mapfile="$root_dir/data/$dataset_name/labelmap_coco.prototxt"
+data_root_dir="/media/data/"
+dataset_name="test_pp"
+mapfile="$cur_dir/data/$dataset_name/labelmap.prototxt"
 anno_type="detection"
 label_type="json"
 db="lmdb"
@@ -20,7 +18,7 @@ if $redo
 then
   extra_cmd="$extra_cmd --redo"
 fi
-for subset in minival testdev train test
+for subset in train test
 do
-  python $root_dir/scripts/create_annoset.py --anno-type=$anno_type --label-type=$label_type --label-map-file=$mapfile --min-dim=$min_dim --max-dim=$max_dim --resize-width=$width --resize-height=$height --check-label $extra_cmd $data_root_dir $root_dir/data/$dataset_name/$subset.txt $data_root_dir/$db/$dataset_name"_"$subset"_"$db examples/$dataset_name 2>&1 | tee $root_dir/data/$dataset_name/$subset.log
+  python $cur_dir/scripts/create_annoset.py --anno-type=$anno_type --label-type=$label_type --label-map-file=$mapfile --min-dim=$min_dim --max-dim=$max_dim --resize-width=$width --resize-height=$height --check-label $extra_cmd $data_root_dir $cur_dir/data/$dataset_name/$subset.txt $data_root_dir/opt/arch/$db/$dataset_name"_"$subset"_"$db $cur_dir/examples/$dataset_name 2>&1 | tee $cur_dir/data/$dataset_name/$subset.log
 done
