@@ -3,7 +3,7 @@ echo $cur_dir
 
 redo=false
 data_root_dir="/media/data/"
-dataset_name="test_pp"
+dataset_name="test_people"
 mapfile="$cur_dir/data/$dataset_name/labelmap.prototxt"
 anno_type="detection"
 label_type="json"

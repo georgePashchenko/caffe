@@ -54,7 +54,7 @@ resume_training = True
 remove_old_models = False
 
 #dirname with converted lmdb
-dir_name = 'test_pp'
+dir_name = 'test_people'
 # The database file for training data. Created by create_data.sh
 train_data = "examples/{}/{}_train_lmdb".format(dir_name, dir_name)
 # The database file for testing data. Created by create_data.sh
@@ -248,7 +248,8 @@ multibox_loss_param = {
     'use_prior_for_matching': True,
     'background_label_id': background_label_id,
     'use_difficult_gt': train_on_diff_gt,
-    'mining_type': P.MultiBoxLoss.MAX_NEGATIVE,
+    'do_neg_mining': True,
+    'neg_pos_ratio': neg_pos_ratio,
     'neg_overlap': 0.5,
     'code_type': code_type,
     }
@@ -301,7 +302,7 @@ batch_size = 32
 accum_batch_size = 32
 iter_size = accum_batch_size / batch_size
 solver_mode = P.Solver.CPU
-device_id = 1
+device_id = 0
 batch_size_per_device = batch_size
 if num_gpus > 0:
   batch_size_per_device = int(math.ceil(float(batch_size) / num_gpus))
@@ -330,13 +331,14 @@ solver_param = {
     # Train parameters
     'base_lr': 0.001,
     'weight_decay': 0.0005,
-    'lr_policy': "fixed",
+    'lr_policy': "multistep",
+    'stepvalue': [10000, 20000, 30000],
     'gamma': 0.1,
     'momentum': 0.9,
     'iter_size': iter_size,
-    'max_iter': 20000,
+    'max_iter': 40000,
     'snapshot': 1000,
-    'display': 1,
+    'display': 100,
     'average_loss': 10,
     'type': "SGD",
     'solver_mode': solver_mode,
